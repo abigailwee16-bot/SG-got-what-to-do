@@ -1,0 +1,18 @@
+{
+  "customers": [
+    {
+      "id": "cust-001",
+      "name": "Sarah Tan",
+      "registeredDate": "2025-08-14",
+      "area": "Tanjong Pagar",
+      "preferredCategories": ["Food & Dining", "Heritage & History"]
+    },
+    {
+      "id": "cust-002",
+      "name": "Marcus Lee",
+      "registeredDate": "2025-11-20",
+      "area": "Marina Bay",
+      "preferredCategories": ["Sports & Active", "Arts & Theatre"]
+    }
+  ]
+}

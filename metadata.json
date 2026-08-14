@@ -1,0 +1,6 @@
+{
+  "name": "SG got what to do",
+  "description": "SG is not as boring as you think - Live Singapore activity and itinerary discovery engine with interactive map routing, verified transit, and personalized recommendations.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
