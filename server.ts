@@ -37,72 +37,220 @@ async function startServer() {
     });
   });
 
-  // 2. Real-time Singapore Weather & Environmental Data (data.gov.sg / NEA)
-  app.get('/api/live-data/weather', async (req, res) => {
+  // 2. Data.gov.sg v2 Live Keyless Weather & Environment In-Memory Cache
+  const weatherCache: Record<string, { timestamp: number; data: any }> = {};
+  const CACHE_TTL_MS = 45000; // 45 seconds cache to avoid rate limit (code: 24)
+
+  const V2_WEATHER_ENDPOINTS = [
+    'two-hr-forecast',
+    'twenty-four-hr-forecast',
+    'four-day-outlook',
+    'air-temperature',
+    'rainfall',
+    'psi',
+    'pm25',
+    'uv',
+    'relative-humidity',
+    'wind-speed',
+  ] as const;
+
+  async function fetchV2Weather(endpoint: string, queryParams: Record<string, any> = {}) {
+    const cacheKey = `${endpoint}_${JSON.stringify(queryParams)}`;
+    const cached = weatherCache[cacheKey];
+    const now = Date.now();
+
+    if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    try {
+      const url = new URL(`https://api-open.data.gov.sg/v2/real-time/api/${endpoint}`);
+      Object.entries(queryParams).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          url.searchParams.append(k, String(v));
+        }
+      });
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          accept: 'application/json',
+          'User-Agent': 'SG-Got-What-To-Do/1.0',
+        },
+      });
+
+      if (!response.ok) {
+        if (cached) return cached.data;
+        throw new Error(`Upstream status ${response.status}`);
+      }
+
+      const json = await response.json();
+
+      // If upstream returned rate limit (code 24) but we have a cached version, return cached
+      if (json.code === 24 && cached) {
+        return cached.data;
+      }
+
+      if (json.code === 0 && json.data) {
+        weatherCache[cacheKey] = {
+          timestamp: now,
+          data: json,
+        };
+      }
+
+      return json;
+    } catch (err: any) {
+      if (cached) return cached.data;
+      throw err;
+    }
+  }
+
+  // Register dedicated API routes for each of the 10 data.gov.sg v2 endpoints
+  V2_WEATHER_ENDPOINTS.forEach((endpoint) => {
+    app.get(`/api/weather/${endpoint}`, async (req, res) => {
+      try {
+        const result = await fetchV2Weather(endpoint, req.query);
+        res.json(result);
+      } catch (err: any) {
+        console.error(`Error fetching v2 weather ${endpoint}:`, err);
+        res.status(500).json({
+          code: 500,
+          error: `Failed to fetch ${endpoint} from data.gov.sg v2 API`,
+          message: err.message,
+        });
+      }
+    });
+  });
+
+  // Generic wildcard proxy for any v2 weather endpoint
+  app.get('/api/weather/v2/:metric', async (req, res) => {
+    const metric = req.params.metric;
+    try {
+      const result = await fetchV2Weather(metric, req.query);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({
+        code: 500,
+        error: `Failed to fetch ${metric} from data.gov.sg v2 API`,
+        message: err.message,
+      });
+    }
+  });
+
+  // Real-time Aggregated Singapore Weather & Environmental Data (data.gov.sg v2)
+  app.get(['/api/live-data/weather', '/api/weather/live'], async (req, res) => {
     try {
       const now = new Date();
-      // Fetch 2-hour weather forecast
-      const forecastRes = await fetch(
-        'https://api.data.gov.sg/v1/environment/2-hour-weather-forecast',
-        { headers: { 'User-Agent': 'SG-Activities-App' } }
-      ).catch(() => null);
 
-      // Fetch air temperature
-      const tempRes = await fetch(
-        'https://api.data.gov.sg/v1/environment/air-temperature',
-        { headers: { 'User-Agent': 'SG-Activities-App' } }
-      ).catch(() => null);
+      // Fetch all v2 sources in parallel with cache-backed resilience
+      const [
+        twoHrData,
+        tempData,
+        rainfallData,
+        psiData,
+        pm25Data,
+        uvData,
+        humidityData,
+        windData,
+        twentyFourHrData,
+        fourDayData,
+      ] = await Promise.all([
+        fetchV2Weather('two-hr-forecast').catch(() => null),
+        fetchV2Weather('air-temperature').catch(() => null),
+        fetchV2Weather('rainfall').catch(() => null),
+        fetchV2Weather('psi').catch(() => null),
+        fetchV2Weather('pm25').catch(() => null),
+        fetchV2Weather('uv').catch(() => null),
+        fetchV2Weather('relative-humidity').catch(() => null),
+        fetchV2Weather('wind-speed').catch(() => null),
+        fetchV2Weather('twenty-four-hr-forecast').catch(() => null),
+        fetchV2Weather('four-day-outlook').catch(() => null),
+      ]);
 
-      // Fetch PSI
-      const psiRes = await fetch(
-        'https://api.data.gov.sg/v1/environment/psi',
-        { headers: { 'User-Agent': 'SG-Activities-App' } }
-      ).catch(() => null);
-
-      let weatherForecast = 'Passing Showers';
-      let temperatureC = 31.2;
-      let humidityPercent = 76;
-      let rainfallMm = 0.8;
-      let psiValue = 38;
+      let weatherForecast = 'Partly Cloudy';
+      let temperatureC = 31.0;
+      let humidityPercent = 75;
+      let rainfallMm = 0.0;
+      let psiValue = 35;
       let psiStatus = 'Good';
+      let pm25Value: number | null = null;
+      let uvIndex: number | null = null;
+      let windSpeedKmH: number | null = null;
       const forecast2hr: { area: string; forecast: string }[] = [];
 
-      if (forecastRes && forecastRes.ok) {
-        const forecastData = await forecastRes.json();
-        const items = forecastData.items?.[0];
-        if (items?.forecasts && Array.isArray(items.forecasts)) {
-          items.forecasts.forEach((f: any) => {
-            forecast2hr.push({ area: f.area, forecast: f.forecast });
-          });
-          // Pick general central/city forecast
-          const cityForecast = items.forecasts.find((f: any) =>
-            ['Central', 'City', 'Downtown Core', 'Kallang'].includes(f.area)
-          );
-          if (cityForecast) {
-            weatherForecast = cityForecast.forecast;
-          } else if (items.forecasts[0]) {
-            weatherForecast = items.forecasts[0].forecast;
-          }
+      // 1. Two-hr forecast
+      const twoHrItems = twoHrData?.data?.items?.[0];
+      if (twoHrItems?.forecasts && Array.isArray(twoHrItems.forecasts)) {
+        twoHrItems.forecasts.forEach((f: any) => {
+          forecast2hr.push({ area: f.area, forecast: f.forecast });
+        });
+        const cityForecast = twoHrItems.forecasts.find((f: any) =>
+          ['City', 'Central Water Catchment', 'Kallang', 'Downtown Core'].includes(f.area)
+        );
+        if (cityForecast) {
+          weatherForecast = cityForecast.forecast;
+        } else if (twoHrItems.forecasts[0]) {
+          weatherForecast = twoHrItems.forecasts[0].forecast;
         }
       }
 
-      if (tempRes && tempRes.ok) {
-        const tempData = await tempRes.json();
-        const readings = tempData.items?.[0]?.readings;
-        if (readings && readings.length > 0) {
-          const avgTemp =
-            readings.reduce((acc: number, curr: any) => acc + (curr.value || 0), 0) /
-            readings.length;
-          temperatureC = Math.round(avgTemp * 10) / 10;
+      // 2. Air Temperature
+      const tempReadings = tempData?.data?.readings || tempData?.data?.items?.[0]?.readings;
+      if (Array.isArray(tempReadings) && tempReadings.length > 0) {
+        const validValues = tempReadings.map((r: any) => r.value).filter((v: any) => typeof v === 'number');
+        if (validValues.length > 0) {
+          const avg = validValues.reduce((a: number, b: number) => a + b, 0) / validValues.length;
+          temperatureC = Math.round(avg * 10) / 10;
         }
       }
 
-      if (psiRes && psiRes.ok) {
-        const psiData = await psiRes.json();
-        const readings = psiData.items?.[0]?.readings;
-        if (readings?.psi_twenty_four_hourly?.national) {
-          psiValue = readings.psi_twenty_four_hourly.national;
-          psiStatus = psiValue <= 50 ? 'Good' : psiValue <= 100 ? 'Moderate' : 'Unhealthy';
+      // 3. Rainfall
+      const rainReadings = rainfallData?.data?.readings || rainfallData?.data?.items?.[0]?.readings;
+      if (Array.isArray(rainReadings) && rainReadings.length > 0) {
+        const validRain = rainReadings.map((r: any) => r.value).filter((v: any) => typeof v === 'number');
+        if (validRain.length > 0) {
+          const maxRain = Math.max(...validRain);
+          rainfallMm = Math.round(maxRain * 10) / 10;
+        }
+      }
+
+      // 4. PSI (Pollutant Standards Index)
+      const psiItems = psiData?.data?.items?.[0];
+      const psiReadings = psiItems?.readings?.psi_twenty_four_hourly || psiItems?.readings?.psiTwentyFourHourly;
+      if (psiReadings) {
+        psiValue = psiReadings.national || psiReadings.central || psiValue;
+        psiStatus = psiValue <= 50 ? 'Good' : psiValue <= 100 ? 'Moderate' : 'Unhealthy';
+      }
+
+      // 5. PM2.5
+      const pm25Items = pm25Data?.data?.items?.[0];
+      const pm25Readings = pm25Items?.readings?.pm25_one_hourly || pm25Items?.readings?.pm25OneHourly;
+      if (pm25Readings) {
+        pm25Value = pm25Readings.national || pm25Readings.central || null;
+      }
+
+      // 6. UV Index
+      const uvRecords = uvData?.data?.records?.[0]?.index || uvData?.data?.index;
+      if (Array.isArray(uvRecords) && uvRecords.length > 0) {
+        uvIndex = uvRecords[uvRecords.length - 1]?.value ?? null;
+      }
+
+      // 7. Relative Humidity
+      const humReadings = humidityData?.data?.readings || humidityData?.data?.items?.[0]?.readings;
+      if (Array.isArray(humReadings) && humReadings.length > 0) {
+        const validHum = humReadings.map((r: any) => r.value).filter((v: any) => typeof v === 'number');
+        if (validHum.length > 0) {
+          const avgHum = validHum.reduce((a: number, b: number) => a + b, 0) / validHum.length;
+          humidityPercent = Math.round(avgHum);
+        }
+      }
+
+      // 8. Wind Speed
+      const windReadings = windData?.data?.readings || windData?.data?.items?.[0]?.readings;
+      if (Array.isArray(windReadings) && windReadings.length > 0) {
+        const validWind = windReadings.map((r: any) => r.value).filter((v: any) => typeof v === 'number');
+        if (validWind.length > 0) {
+          const avgWind = validWind.reduce((a: number, b: number) => a + b, 0) / validWind.length;
+          windSpeedKmH = Math.round(avgWind * 1.852 * 10) / 10; // knots to km/h
         }
       }
 
@@ -113,29 +261,37 @@ async function startServer() {
         rainfallMm,
         psiValue,
         psiStatus,
-        forecast2hr: forecast2hr.slice(0, 12),
-        lastUpdated: now.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        pm25Value,
+        uvIndex,
+        windSpeedKmH,
+        forecast2hr: forecast2hr.slice(0, 16),
+        twentyFourHr: twentyFourHrData?.data?.records?.[0] || null,
+        fourDayOutlook: fourDayData?.data?.records?.[0] || null,
+        lastUpdated: now.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
         dataConfidence: 'LIVE',
-        source: 'data.gov.sg / NEA Live API',
+        source: 'api-open.data.gov.sg v2 Real-Time Environment API',
       });
     } catch (err: any) {
-      console.warn('Weather API fallback used:', err.message);
+      console.warn('Weather v2 fallback used:', err.message);
       res.json({
         weatherForecast: 'Partly Cloudy with passing afternoon showers',
-        temperatureC: 31,
-        humidityPercent: 78,
-        rainfallMm: 1.2,
-        psiValue: 42,
+        temperatureC: 31.2,
+        humidityPercent: 76,
+        rainfallMm: 0.8,
+        psiValue: 38,
         psiStatus: 'Good',
+        pm25Value: 12,
+        uvIndex: 6,
+        windSpeedKmH: 14.5,
         forecast2hr: [
-          { area: 'City / Civic District', forecast: 'Passing Showers' },
-          { area: 'Marina Bay / Downtown', forecast: 'Passing Showers' },
-          { area: 'Chinatown / Outram', forecast: 'Cloudy' },
-          { area: 'Sentosa / HarbourFront', forecast: 'Fair' },
+          { area: 'City', forecast: 'Partly Cloudy (Day)' },
+          { area: 'Marina Bay', forecast: 'Partly Cloudy (Day)' },
+          { area: 'Sentosa', forecast: 'Fair (Day)' },
+          { area: 'Changi', forecast: 'Passing Showers' },
         ],
         lastUpdated: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' }),
         dataConfidence: 'ESTIMATED',
-        source: 'data.gov.sg (Cached/Fallback)',
+        source: 'data.gov.sg v2 (Cached/Fallback)',
       });
     }
   });
