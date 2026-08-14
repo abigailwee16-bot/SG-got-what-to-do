@@ -228,3 +228,36 @@ export interface CommunityPlan {
   similarityScore?: number;
   similarityHighlights?: string[];
 }
+
+export interface NextBusInfo {
+  originCode: string;
+  destinationCode: string;
+  estimatedArrival: string;
+  minutesToArrival: number | null;
+  arrivalText: string;
+  latitude: string;
+  longitude: string;
+  visitNumber: string;
+  load: 'SEA' | 'SDA' | 'LSD' | string;
+  loadDescription: string;
+  feature: 'WAB' | string;
+  isWheelchairAccessible: boolean;
+  type: 'SD' | 'DD' | 'BD' | string;
+  typeDescription: string;
+}
+
+export interface BusServiceArrival {
+  serviceNo: string;
+  operator: string;
+  nextBus?: NextBusInfo;
+  nextBus2?: NextBusInfo;
+  nextBus3?: NextBusInfo;
+}
+
+export interface BusArrivalData {
+  busStopCode: string;
+  services: BusServiceArrival[];
+  lastUpdated: string;
+  dataConfidence: DataConfidence;
+  source: string;
+}

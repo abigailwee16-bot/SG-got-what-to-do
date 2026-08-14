@@ -21,10 +21,12 @@ import {
   Zap,
   Map as MapIcon,
   ListOrdered,
+  Bus,
 } from 'lucide-react';
 import { RecommendedPlan, UserPreferences, LiveSingaporeConditions } from '../types';
 import { MRT_LINES_MAP } from '../utils/singaporeData';
 import { ItineraryMap } from './ItineraryMap';
+import { BusArrivalWidget } from './BusArrivalWidget';
 
 interface PlanResultProps {
   plan: RecommendedPlan;
@@ -48,6 +50,7 @@ export const PlanResult: React.FC<PlanResultProps> = ({
   const [viewMode, setViewMode] = useState<'both' | 'map' | 'timeline'>('both');
   const [isAttireOpen, setIsAttireOpen] = useState(false);
   const [isRainOpen, setIsRainOpen] = useState(false);
+  const [showBusArrivals, setShowBusArrivals] = useState(false);
 
   return (
     <div id="plan-result-container" className="space-y-6 animate-in fade-in duration-300">
@@ -305,14 +308,39 @@ export const PlanResult: React.FC<PlanResultProps> = ({
       </div>
 
       {/* 3. Getting Around & Navigation Handoff */}
-      <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200/90">
-        <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
-          <Train className="w-5 h-5 text-rose-600" />
-          <span>Getting Around & Transit Route</span>
-        </h3>
-        <p className="text-xs text-slate-500 mb-4">
-          Singapore public transport instructions based on OneMap & MRT connectivity
-        </p>
+      <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200/90 space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Train className="w-5 h-5 text-rose-600" />
+              <span>Getting Around & Transit Route</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              Singapore public transport instructions based on OneMap, MRT & LTA DataMall
+            </p>
+          </div>
+
+          <button
+            id="btn-toggle-bus-arrivals"
+            type="button"
+            onClick={() => setShowBusArrivals(!showBusArrivals)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              showBusArrivals
+                ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+            }`}
+          >
+            <Bus className="w-3.5 h-3.5" />
+            <span>{showBusArrivals ? 'Hide Next Bus Timings' : 'Check Live Bus Arrival (LTA)'}</span>
+          </button>
+        </div>
+
+        {/* LTA DataMall Live Bus Arrival Drawer */}
+        {showBusArrivals && (
+          <div className="animate-in fade-in duration-200">
+            <BusArrivalWidget initialBusStopCode="83139" />
+          </div>
+        )}
 
         <div className="space-y-3">
           {plan.travelSegments.map((seg, idx) => (

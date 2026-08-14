@@ -140,7 +140,120 @@ async function startServer() {
     }
   });
 
-  // 3. OneMap Singapore Location Search & Geocoding
+  // Helper to format LTA DataMall NextBus object
+  function formatBusInfo(rawBus: any): any {
+    if (!rawBus || !rawBus.EstimatedArrival) return null;
+
+    const arrivalTime = new Date(rawBus.EstimatedArrival).getTime();
+    const now = Date.now();
+    const diffMs = arrivalTime - now;
+    const minutes = Math.round(diffMs / 60000);
+
+    let arrivalText = 'Arr';
+    if (minutes > 1) {
+      arrivalText = `${minutes}m`;
+    } else if (minutes === 1) {
+      arrivalText = '1m';
+    } else if (diffMs < -60000) {
+      arrivalText = 'Departed';
+    }
+
+    const loadMap: Record<string, string> = {
+      SEA: 'Seats Available',
+      SDA: 'Standing Available',
+      LSD: 'Limited Standing',
+    };
+
+    const typeMap: Record<string, string> = {
+      SD: 'Single Deck',
+      DD: 'Double Deck',
+      BD: 'Bendy Bus',
+    };
+
+    return {
+      originCode: rawBus.OriginCode || '',
+      destinationCode: rawBus.DestinationCode || '',
+      estimatedArrival: rawBus.EstimatedArrival,
+      minutesToArrival: Math.max(0, minutes),
+      arrivalText,
+      latitude: rawBus.Latitude || '',
+      longitude: rawBus.Longitude || '',
+      visitNumber: rawBus.VisitNumber || '1',
+      load: rawBus.Load || 'SEA',
+      loadDescription: loadMap[rawBus.Load] || 'Seats Available',
+      feature: rawBus.Feature || '',
+      isWheelchairAccessible: rawBus.Feature === 'WAB',
+      type: rawBus.Type || 'SD',
+      typeDescription: typeMap[rawBus.Type] || 'Single Deck',
+    };
+  }
+
+  // 3. LTA DataMall Bus Arrival v3 API (20-second live transit refresh)
+  // URL: https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=83139
+  // Optional: &ServiceNo=15
+  // Header: AccountKey: qZvhPBcOT16UFKiwYuzzDg==
+  app.get(['/api/bus-arrival', '/api/transit/bus-arrival'], async (req, res) => {
+    const busStopCode = String(req.query.BusStopCode || req.query.busStopCode || '').trim();
+    const serviceNo = String(req.query.ServiceNo || req.query.serviceNo || '').trim();
+
+    if (!busStopCode) {
+      return res.status(400).json({
+        error: 'BusStopCode parameter is required (e.g., ?BusStopCode=83139 or ?BusStopCode=83139&ServiceNo=15)',
+      });
+    }
+
+    const accountKey = process.env.LTA_DATAMALL_ACCOUNT_KEY || 'qZvhPBcOT16UFKiwYuzzDg==';
+
+    try {
+      let ltaUrl = `https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=${encodeURIComponent(busStopCode)}`;
+      if (serviceNo) {
+        ltaUrl += `&ServiceNo=${encodeURIComponent(serviceNo)}`;
+      }
+
+      const response = await fetch(ltaUrl, {
+        headers: {
+          AccountKey: accountKey,
+          accept: 'application/json',
+          'User-Agent': 'SG-Got-What-To-Do/1.0',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`LTA DataMall API responded with status ${response.status}:`, errorText);
+        return res.status(response.status).json({
+          error: `LTA DataMall API error: ${response.status}`,
+          details: errorText,
+        });
+      }
+
+      const data = await response.json();
+      const formattedServices = (data.Services || []).map((srv: any) => ({
+        serviceNo: srv.ServiceNo,
+        operator: srv.Operator,
+        nextBus: formatBusInfo(srv.NextBus),
+        nextBus2: formatBusInfo(srv.NextBus2),
+        nextBus3: formatBusInfo(srv.NextBus3),
+      }));
+
+      return res.json({
+        busStopCode: data.BusStopCode || busStopCode,
+        services: formattedServices,
+        raw: data,
+        lastUpdated: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
+        dataConfidence: 'LIVE',
+        source: 'LTA DataMall v3 Live Bus Arrival API',
+      });
+    } catch (err: any) {
+      console.error('Error fetching LTA Bus Arrival:', err);
+      return res.status(500).json({
+        error: 'Failed to fetch bus arrival data from LTA DataMall',
+        message: err.message,
+      });
+    }
+  });
+
+  // 4. OneMap Singapore Location Search & Geocoding
   app.get('/api/location/search', async (req, res) => {
     const query = String(req.query.query || '').trim();
     if (!query) {
