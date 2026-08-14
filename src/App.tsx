@@ -9,6 +9,7 @@ import { Header } from './components/Header';
 import { PreferenceForm } from './components/PreferenceForm';
 import { PlanResult } from './components/PlanResult';
 import { InspireMe } from './components/InspireMe';
+import { DisqusForum } from './components/DisqusForum';
 import {
   CommunityPlan,
   CommunityTip,
@@ -338,6 +339,12 @@ export default function App() {
             onHelpfulTip={handleHelpfulTip}
           />
         )}
+
+        {/* Community Discussion Forum (Disqus) */}
+        <DisqusForum
+          identifier="sg-got-what-to-do-singapore-discussions"
+          title="SG got what to do - Singapore Activities & Itinerary Discussion"
+        />
       </main>
 
       {/* 3. Accessible Footer */}
