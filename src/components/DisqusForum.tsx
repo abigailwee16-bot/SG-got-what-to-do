@@ -13,48 +13,56 @@ export const DisqusForum: React.FC<DisqusForumProps> = ({
   title = 'SG got what to do - Community Discussion',
 }) => {
   useEffect(() => {
-    const pageUrl = url || window.location.href;
-    const pageIdentifier = identifier;
-    const pageTitle = title;
+    try {
+      const pageUrl = url || window.location.href;
+      const pageIdentifier = identifier;
+      const pageTitle = title;
 
-    // Window global disqus configuration
-    (window as any).disqus_config = function (this: any) {
-      this.page.url = pageUrl;
-      this.page.identifier = pageIdentifier;
-      this.page.title = pageTitle;
-    };
+      // Window global disqus configuration
+      (window as any).disqus_config = function (this: any) {
+        this.page.url = pageUrl;
+        this.page.identifier = pageIdentifier;
+        this.page.title = pageTitle;
+      };
 
-    // If DISQUS is already loaded on window, trigger reset
-    if ((window as any).DISQUS) {
-      (window as any).DISQUS.reset({
-        reload: true,
-        config: function (this: any) {
-          this.page.url = pageUrl;
-          this.page.identifier = pageIdentifier;
-          this.page.title = pageTitle;
-        },
-      });
-    } else {
-      // Check if script already exists to avoid duplication
-      const existingScript = document.getElementById('dsq-embed-scr');
-      if (!existingScript) {
-        const d = document;
-        const s = d.createElement('script');
-        s.id = 'dsq-embed-scr';
-        s.src = 'https://abs-smu.disqus.com/embed.js';
-        s.setAttribute('data-timestamp', String(+new Date()));
-        (d.head || d.body).appendChild(s);
+      // If DISQUS is already loaded on window, trigger reset
+      if ((window as any).DISQUS) {
+        try {
+          (window as any).DISQUS.reset({
+            reload: true,
+            config: function (this: any) {
+              this.page.url = pageUrl;
+              this.page.identifier = pageIdentifier;
+              this.page.title = pageTitle;
+            },
+          });
+        } catch (resetErr) {
+          console.warn('[Disqus] reset warning:', resetErr);
+        }
+      } else {
+        // Check if script already exists to avoid duplication
+        const existingScript = document.getElementById('dsq-embed-scr');
+        if (!existingScript) {
+          const d = document;
+          const s = d.createElement('script');
+          s.id = 'dsq-embed-scr';
+          s.src = 'https://abs-smu.disqus.com/embed.js';
+          s.setAttribute('data-timestamp', String(+new Date()));
+          (d.head || d.body).appendChild(s);
+        }
       }
-    }
 
-    // Load Disqus Count Script if not present
-    if (!document.getElementById('dsq-count-scr')) {
-      const d = document;
-      const countScript = d.createElement('script');
-      countScript.id = 'dsq-count-scr';
-      countScript.src = '//abs-smu.disqus.com/count.js';
-      countScript.async = true;
-      (d.head || d.body).appendChild(countScript);
+      // Load Disqus Count Script if not present
+      if (!document.getElementById('dsq-count-scr')) {
+        const d = document;
+        const countScript = d.createElement('script');
+        countScript.id = 'dsq-count-scr';
+        countScript.src = 'https://abs-smu.disqus.com/count.js';
+        countScript.async = true;
+        (d.head || d.body).appendChild(countScript);
+      }
+    } catch (err) {
+      console.warn('[Disqus] embed initialization caught non-fatal exception:', err);
     }
   }, [url, identifier, title]);
 
