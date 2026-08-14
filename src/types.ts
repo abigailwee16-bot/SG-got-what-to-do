@@ -261,3 +261,45 @@ export interface BusArrivalData {
   dataConfidence: DataConfidence;
   source: string;
 }
+
+export type OneMapRouteType = 'walk' | 'drive' | 'cycle' | 'pt';
+
+export interface OneMapRouteInstruction {
+  instruction: string;
+  distance: number;
+  duration: number;
+  sign?: string;
+  length?: number;
+}
+
+export interface OneMapRoutePlan {
+  status_message?: string;
+  route_summary?: {
+    total_time: number;
+    total_distance: number;
+    start_point: string;
+    end_point: string;
+  };
+  route_geometry?: string;
+  route_instructions?: OneMapRouteInstruction[];
+  itineraries?: any[];
+  [key: string]: any;
+}
+
+export interface OneMapRouteResult {
+  routeType: OneMapRouteType;
+  start: string;
+  end: string;
+  summary: {
+    totalTimeMinutes: number;
+    totalDistanceMeters: number;
+    formattedDistance: string;
+    formattedDuration: string;
+  };
+  instructions: OneMapRouteInstruction[];
+  geometry?: string;
+  raw?: any;
+  dataConfidence: DataConfidence;
+  source: string;
+  requiresToken?: boolean;
+}
